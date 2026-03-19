@@ -30,6 +30,8 @@
     "build": "tsup src/index.ts src/spl-token.ts --format cjs,esm --dts --clean --external privacycash --external @coral-xyz/anchor",
     "api:baseline:check": "node scripts/check-api-baseline.mjs --check",
     "api:baseline:generate": "node scripts/check-api-baseline.mjs --generate",
+    "errors:check": "node scripts/generate-errors.mjs --check",
+    "errors:generate": "node scripts/generate-errors.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepublishOnly": "npm run build",
     "test:devnet:deep": "AGENC_DEVNET_DRIFT_MODE=compat node scripts/devnet-integration-deep.mjs",

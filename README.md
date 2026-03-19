@@ -120,8 +120,13 @@ Every release must pass:
 
 ## Protocol alignment note
 
-Protocol-IDL alignment is intentionally not tested in this repo yet. The old
-monorepo `target/idl/agenc_coordination.json`-based test was removed from this
-repo because it depended on a private monorepo build artifact. Gate 11 moves
-that contract check into the future protocol repo or a cross-repo integration
-job.
+Full protocol-IDL alignment is intentionally not tested in this repo yet. The
+old monorepo `target/idl/agenc_coordination.json`-based test was removed from
+this repo because it depended on a private monorepo build artifact. Gate 11
+moves that contract check into the future protocol repo or a cross-repo
+integration job.
+
+The SDK error map is still guarded here. `src/errors.ts` is regenerated from a
+committed snapshot of protocol IDL errors in `data/coordination-idl-errors.json`.
+Refresh that snapshot from the protocol repo with
+`AGENC_IDL_PATH=/absolute/path/to/agenc_coordination.json npm run errors:generate`.
