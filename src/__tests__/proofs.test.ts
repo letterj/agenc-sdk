@@ -8,7 +8,7 @@
  * 4. Salt generation produces valid field elements
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import {
   pubkeyToField,
@@ -22,6 +22,7 @@ import {
   FIELD_MODULUS,
   bigintToBytes32,
 } from "../proofs";
+import * as prover from "../prover";
 import {
   OUTPUT_FIELD_COUNT,
   RISC0_SEAL_BYTES_LEN,
@@ -29,6 +30,10 @@ import {
   RISC0_IMAGE_ID_LEN,
   RISC0_SELECTOR_LEN,
 } from "../constants";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("proofs", () => {
   describe("pubkeyToField", () => {
@@ -617,23 +622,18 @@ describe("proofs", () => {
         toBytes32(hashes.nullifier),
       ]);
 
-      vi.doMock("../prover", () => ({
-        prove: vi.fn().mockResolvedValue({
+      vi.spyOn(prover, "prove").mockResolvedValue({
           sealBytes: Buffer.alloc(RISC0_SEAL_BYTES_LEN, 0xab),
           journal: expectedJournal,
           imageId: Buffer.alloc(RISC0_IMAGE_ID_LEN, 0xcd),
-        }),
-      }));
+      });
 
-      const { generateProof: fn } = await import("../proofs");
-      const result = await fn(params, {
+      const result = await generateProof(params, {
         kind: "remote",
         endpoint: "https://test.com",
       });
       expect(result.sealBytes.length).toBe(RISC0_SEAL_BYTES_LEN);
       expect(result.journal.length).toBe(RISC0_JOURNAL_LEN);
-
-      vi.doUnmock("../prover");
     });
   });
 
@@ -697,12 +697,9 @@ describe("proofs", () => {
         imageId: fakeImageId,
       });
 
-      vi.doMock("../prover", () => ({
-        prove: proveMock,
-      }));
+      const proveSpy = vi.spyOn(prover, "prove").mockImplementation(proveMock);
 
-      const { generateProof: fn } = await import("../proofs");
-      const result = await fn(params, {
+      const result = await generateProof(params, {
         kind: "remote",
         endpoint: "https://test.com",
       });
@@ -721,9 +718,9 @@ describe("proofs", () => {
       expect(result.nullifier.length).toBe(32);
       expect(result.proofSize).toBe(RISC0_SEAL_BYTES_LEN - RISC0_SELECTOR_LEN);
       expect(result.generationTime).toBeGreaterThanOrEqual(0);
-      expect(proveMock).toHaveBeenCalledTimes(1);
+      expect(proveSpy).toHaveBeenCalledTimes(1);
 
-      const proveInput = proveMock.mock.calls[0][0];
+      const proveInput = proveSpy.mock.calls[0][0];
       expect(proveInput.taskPda).toEqual(new Uint8Array(params.taskPda.toBytes()));
       expect(proveInput.agentAuthority).toEqual(
         new Uint8Array(params.agentPubkey.toBytes()),
@@ -738,8 +735,6 @@ describe("proofs", () => {
       expect(proveInput.agentSecret).toEqual(
         Uint8Array.from(bigintToBytes32(67890n)),
       );
-
-      vi.doUnmock("../prover");
     });
 
     it("proof is sealBytes minus the 4-byte selector", async () => {
@@ -754,16 +749,13 @@ describe("proofs", () => {
       for (let i = 4; i < RISC0_SEAL_BYTES_LEN; i++)
         fakeSealBytes[i] = i & 0xff;
 
-      vi.doMock("../prover", () => ({
-        prove: vi.fn().mockResolvedValue({
+      vi.spyOn(prover, "prove").mockResolvedValue({
           sealBytes: fakeSealBytes,
           journal: expectedJournal,
           imageId: Buffer.alloc(RISC0_IMAGE_ID_LEN, 0xee),
-        }),
-      }));
+      });
 
-      const { generateProof: fn } = await import("../proofs");
-      const result = await fn(params, {
+      const result = await generateProof(params, {
         kind: "remote",
         endpoint: "https://test.com",
       });
@@ -771,46 +763,32 @@ describe("proofs", () => {
       // proof should be bytes [4..260] of sealBytes
       expect(result.proof.length).toBe(256);
       expect(result.proof[0]).toBe(4 & 0xff);
-
-      vi.doUnmock("../prover");
     });
 
     it("rejects journal mismatch from prover", async () => {
       const params = makeProofParams();
       const tamperedJournal = Buffer.alloc(RISC0_JOURNAL_LEN, 0xff); // all 0xff — won't match
 
-      vi.doMock("../prover", () => ({
-        prove: vi.fn().mockResolvedValue({
+      vi.spyOn(prover, "prove").mockResolvedValue({
           sealBytes: Buffer.alloc(RISC0_SEAL_BYTES_LEN),
           journal: tamperedJournal,
           imageId: Buffer.alloc(RISC0_IMAGE_ID_LEN),
-        }),
-      }));
+      });
 
-      const { generateProof: fn } = await import("../proofs");
       await expect(
-        fn(params, { kind: "remote", endpoint: "https://test.com" }),
+        generateProof(params, { kind: "remote", endpoint: "https://test.com" }),
       ).rejects.toThrow("does not match computed fields");
-
-      vi.doUnmock("../prover");
     });
 
     it("propagates ProverError from backend", async () => {
       const params = makeProofParams();
-      const { ProverError: PE } = await import("../prover");
+      vi
+        .spyOn(prover, "prove")
+        .mockRejectedValue(new prover.ProverError("remote failed", "remote"));
 
-      vi.doMock("../prover", () => ({
-        prove: vi
-          .fn()
-          .mockRejectedValue(new PE("remote failed", "remote")),
-      }));
-
-      const { generateProof: fn } = await import("../proofs");
       await expect(
-        fn(params, { kind: "remote", endpoint: "https://test.com" }),
+        generateProof(params, { kind: "remote", endpoint: "https://test.com" }),
       ).rejects.toThrow("remote failed");
-
-      vi.doUnmock("../prover");
     });
 
     it("locally computed hashes match individual function results", async () => {
@@ -818,16 +796,13 @@ describe("proofs", () => {
       const expectedJournal = buildExpectedJournal(params);
       const fakeImageId = Buffer.alloc(RISC0_IMAGE_ID_LEN, 0x11);
 
-      vi.doMock("../prover", () => ({
-        prove: vi.fn().mockResolvedValue({
+      vi.spyOn(prover, "prove").mockResolvedValue({
           sealBytes: Buffer.alloc(RISC0_SEAL_BYTES_LEN),
           journal: expectedJournal,
           imageId: fakeImageId,
-        }),
-      }));
+      });
 
-      const { generateProof: fn } = await import("../proofs");
-      const result = await fn(params, {
+      const result = await generateProof(params, {
         kind: "remote",
         endpoint: "https://test.com",
       });
@@ -857,7 +832,6 @@ describe("proofs", () => {
         true,
       );
 
-      vi.doUnmock("../prover");
     });
   });
 });
